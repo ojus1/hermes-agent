@@ -1447,6 +1447,29 @@ class TestRunConversation:
         assert second_headers["X-Hermes-Step-Index"] == "2"
         assert first_headers["X-Hermes-Request-Id"] != second_headers["X-Hermes-Request-Id"]
 
+    def test_resumed_history_increments_outer_turn_id(self, agent):
+        self._setup_agent(agent)
+        agent.base_url = "http://127.0.0.1:30050/v1"
+        resp = _mock_response(content="Follow-up answer", finish_reason="stop")
+        agent.client.chat.completions.create.return_value = resp
+        conversation_history = [
+            {"role": "user", "content": "First turn"},
+            {"role": "assistant", "content": "First answer"},
+        ]
+        with (
+            patch.object(agent, "_persist_session"),
+            patch.object(agent, "_save_trajectory"),
+            patch.object(agent, "_cleanup_task_resources"),
+        ):
+            result = agent.run_conversation(
+                "Second turn",
+                conversation_history=conversation_history,
+            )
+        assert result["final_response"] == "Follow-up answer"
+        headers = agent.client.chat.completions.create.call_args.kwargs["extra_headers"]
+        assert headers["X-Hermes-Outer-Turn-Id"] == "2"
+        assert headers["X-Hermes-Step-Index"] == "1"
+
     def test_interrupt_breaks_loop(self, agent):
         self._setup_agent(agent)
 

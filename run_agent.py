@@ -6470,6 +6470,13 @@ class AIAgent:
         # be saved to session DB, session logs, or batch trajectories, but they're
         # automatically re-applied on every API call (including session continuations).
         
+        # Reconstruct the turn counter when a fresh AIAgent instance resumes an
+        # existing session from stored history (gateway / CLI resume path).
+        if conversation_history and self._user_turn_count == 0:
+            self._user_turn_count = sum(
+                1 for msg in messages if msg.get("role") == "user"
+            )
+
         # Track user turns for memory flush and periodic nudge logic
         self._user_turn_count += 1
         _rl_headers_enabled = (
