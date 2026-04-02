@@ -1404,6 +1404,7 @@ class TestRunConversation:
 
     def test_stop_finish_reason_returns_response(self, agent):
         self._setup_agent(agent)
+        agent.base_url = "http://127.0.0.1:30050/v1"
         resp = _mock_response(content="Final answer", finish_reason="stop")
         agent.client.chat.completions.create.return_value = resp
         with (
@@ -1414,9 +1415,17 @@ class TestRunConversation:
             result = agent.run_conversation("hello")
         assert result["final_response"] == "Final answer"
         assert result["completed"] is True
+        call_kwargs = agent.client.chat.completions.create.call_args.kwargs
+        headers = call_kwargs["extra_headers"]
+        assert headers["X-Session-Id"] == agent.session_id
+        assert headers["X-Hermes-Outer-Turn-Id"] == "1"
+        assert headers["X-Hermes-Step-Index"] == "1"
+        assert headers["X-Turn-Type"] == "main"
+        assert headers["X-Hermes-Request-Id"].startswith("hermes_rl_")
 
     def test_tool_calls_then_stop(self, agent):
         self._setup_agent(agent)
+        agent.base_url = "http://127.0.0.1:30050/v1"
         tc = _mock_tool_call(name="web_search", arguments="{}", call_id="c1")
         resp1 = _mock_response(content="", finish_reason="tool_calls", tool_calls=[tc])
         resp2 = _mock_response(content="Done searching", finish_reason="stop")
@@ -1430,6 +1439,13 @@ class TestRunConversation:
             result = agent.run_conversation("search something")
         assert result["final_response"] == "Done searching"
         assert result["api_calls"] == 2
+        first_headers = agent.client.chat.completions.create.call_args_list[0].kwargs["extra_headers"]
+        second_headers = agent.client.chat.completions.create.call_args_list[1].kwargs["extra_headers"]
+        assert first_headers["X-Hermes-Outer-Turn-Id"] == "1"
+        assert second_headers["X-Hermes-Outer-Turn-Id"] == "1"
+        assert first_headers["X-Hermes-Step-Index"] == "1"
+        assert second_headers["X-Hermes-Step-Index"] == "2"
+        assert first_headers["X-Hermes-Request-Id"] != second_headers["X-Hermes-Request-Id"]
 
     def test_interrupt_breaks_loop(self, agent):
         self._setup_agent(agent)
@@ -1743,6 +1759,7 @@ class TestFlushSentinelNotLeaked:
     def test_flush_sentinel_stripped_from_api_messages(self, agent_with_memory_tool):
         """Verify _flush_sentinel is not sent to the API provider."""
         agent = agent_with_memory_tool
+        agent.base_url = "http://127.0.0.1:30050/v1"
         agent._memory_store = MagicMock()
         agent._memory_flush_min_turns = 1
         agent._user_turn_count = 10
@@ -1772,6 +1789,7 @@ class TestFlushSentinelNotLeaked:
             assert "_flush_sentinel" not in msg, (
                 f"_flush_sentinel leaked to API in message: {msg}"
             )
+        assert "extra_headers" not in call_args.kwargs
 
 
 # ---------------------------------------------------------------------------

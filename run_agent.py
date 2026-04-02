@@ -89,6 +89,7 @@ from agent.model_metadata import (
 )
 from agent.context_compressor import ContextCompressor
 from agent.prompt_caching import apply_anthropic_cache_control
+from agent.rl_headers import build_rl_headers, new_rl_request_id, should_inject_rl_headers
 from agent.prompt_builder import build_skills_system_prompt, build_context_files_prompt, load_soul_md, TOOL_USE_ENFORCEMENT_GUIDANCE, TOOL_USE_ENFORCEMENT_MODELS, DEVELOPER_ROLE_MODELS
 from agent.usage_pricing import estimate_usage_cost, normalize_usage
 from agent.display import (
@@ -6471,6 +6472,11 @@ class AIAgent:
         
         # Track user turns for memory flush and periodic nudge logic
         self._user_turn_count += 1
+        _rl_headers_enabled = (
+            self.api_mode == "chat_completions"
+            and should_inject_rl_headers(self.base_url)
+        )
+        _rl_outer_turn_id = str(self._user_turn_count)
 
         # Preserve the original user message (no nudge injection).
         # Honcho should receive the actual user input, not system nudges.
@@ -6831,10 +6837,23 @@ class AIAgent:
 
             finish_reason = "stop"
             response = None  # Guard against UnboundLocalError if all retries fail
+            rl_extra_headers = None
+            if _rl_headers_enabled:
+                rl_extra_headers = build_rl_headers(
+                    session_id=self.session_id,
+                    outer_turn_id=_rl_outer_turn_id,
+                    step_index=api_call_count,
+                    turn_type="main",
+                    request_id=new_rl_request_id(),
+                )
 
             while retry_count < max_retries:
                 try:
                     api_kwargs = self._build_api_kwargs(api_messages)
+                    if rl_extra_headers is not None:
+                        extra_headers = dict(api_kwargs.get("extra_headers") or {})
+                        extra_headers.update(rl_extra_headers)
+                        api_kwargs["extra_headers"] = extra_headers
                     if self.api_mode == "codex_responses":
                         api_kwargs = self._preflight_codex_api_kwargs(api_kwargs, allow_stream=False)
 
